@@ -368,3 +368,240 @@ noTokenId = keccak256(0x2791...Aa84174, collectionId_no)
 - 将 Gamma API 获取的市场信息结果保存为 `fixtures/market_<slug>.json`
 
 这样做可以确保在没有链上连接时也能进行解析函数的单元测试，并保证解析逻辑的幂等和正确。
+
+---
+
+## 参考实现示例
+
+以下是基于本项目代码的具体示例，供学习和参考。
+
+### 环境配置
+
+1. 复制 `.env.example` 为 `.env` 并填入必要配置：
+
+```bash
+cp .env.example .env
+```
+
+2. 安装依赖：
+
+```bash
+pip install -r requirements.txt
+```
+
+3. 配置 RPC URL（必需，可使用 Alchemy/Infura 等 Polygon RPC 服务）：
+
+```
+RPC_URL=https://polygon-mainnet.g.alchemy.com/v2/YOUR_API_KEY
+```
+
+### 示例交易哈希
+
+项目中使用的示例交易哈希：
+
+```
+0x916cad96dd5c219997638133512fd17fe7c1ce72b830157e4fd5323cf4f19946
+```
+
+该交易包含了 Polymarket 的 `OrderFilled` 事件，可用于测试交易解码器。
+
+### Trade Decoder 示例
+
+`src/trade_decoder.py` 实现了交易日志解析功能。核心数据结构：
+
+```python
+@dataclass(frozen=True)
+class Trade:
+    tx_hash: str
+    log_index: int
+    exchange: str
+    order_hash: str
+    maker: str
+    taker: str
+    maker_asset_id: str
+    taker_asset_id: str
+    maker_amount: str
+    taker_amount: str
+    fee: str
+    price: str
+    token_id: str
+    side: str
+```
+
+价格与方向判定逻辑：
+
+```python
+if maker_asset_id == 0:  # maker 出 USDC
+    price = Decimal(maker_amount) / Decimal(taker_amount)
+    token_id = taker_asset_id
+    side = "BUY"
+else:  # maker 出 Token
+    price = Decimal(taker_amount) / Decimal(maker_amount)
+    token_id = maker_asset_id
+    side = "SELL"
+```
+
+### Market Decoder 示例
+
+`src/market_decoder.py` 实现了市场参数解码功能。TokenId 计算使用 `src/ctf/derive.py` 中的 `derive_binary_positions` 函数：
+
+```python
+positions = derive_binary_positions(
+    oracle=oracle,
+    question_id=question_id,
+    condition_id=condition_id,
+    collateral_token=collateral_token,
+)
+# positions.position_yes -> YES Token ID
+# positions.position_no  -> NO Token ID
+```
+
+### Gamma API 集成
+
+`src/indexer/gamma.py` 提供了与 Gamma API 交互的函数：
+
+```python
+# 按 slug 获取事件
+event = fetch_event_by_slug(base_url, "will-there-be-another-us-government-shutdown-by-january-31")
+
+# 按 slug 获取市场
+market = fetch_market_by_slug(base_url, market_slug)
+
+# 按 conditionId 或 tokenIds 查找市场
+market = fetch_market_by_condition_or_tokens(base_url, condition_id=cid, token_ids=[tid])
+```
+
+---
+
+## 验证命令规范
+
+> **重要提示**：任务验收将**严格按照以下规范**进行。请确保你的实现能够通过下述所有验证命令，并产出符合规定格式的输出。**不符合规范的提交将无法通过验收。**
+
+完成任务后，请使用以下统一命令进行验证。所有命令均在 `stage1/` 目录下执行。
+
+### 前置检查
+
+```bash
+# 确保环境配置正确
+cp .env.example .env
+# 编辑 .env 填入有效的 RPC_URL
+
+# 安装依赖
+pip install -r requirements.txt
+```
+
+### 任务 A：交易解码器验证
+
+```bash
+# 基础用法：解析指定交易的 OrderFilled 事件
+python -m src.trade_decoder --tx-hash 0x916cad96dd5c219997638133512fd17fe7c1ce72b830157e4fd5323cf4f19946
+
+# 输出到文件
+python -m src.trade_decoder \
+    --tx-hash 0x916cad96dd5c219997638133512fd17fe7c1ce72b830157e4fd5323cf4f19946 \
+    --output ./data/trades.json
+```
+
+**预期输出格式**：
+
+```json
+[
+  {
+    "tx_hash": "0x916cad...",
+    "log_index": 123,
+    "exchange": "0xC5d563A36AE78145C45a50134d48A1215220f80a",
+    "maker": "0x...",
+    "taker": "0x...",
+    "maker_asset_id": "0",
+    "taker_asset_id": "12345...",
+    "maker_amount": "1000000",
+    "taker_amount": "1000000",
+    "price": "1.0",
+    "token_id": "12345...",
+    "side": "BUY"
+  }
+]
+```
+
+### 任务 B：市场解码器验证
+
+```bash
+# 通过 Gamma API slug 获取市场信息并计算 TokenId
+python -m src.market_decoder \
+    --market-slug will-there-be-another-us-government-shutdown-by-january-31
+
+# 通过交易哈希解析 ConditionPreparation 事件
+python -m src.market_decoder \
+    --tx-hash <condition_preparation_tx_hash> \
+    --log-index <log_index>
+
+# 输出到文件
+python -m src.market_decoder \
+    --market-slug will-there-be-another-us-government-shutdown-by-january-31 \
+    --output ./data/market.json
+```
+
+**预期输出格式**：
+
+```json
+{
+  "conditionId": "0xabc...123",
+  "oracle": "0x157Ce2d672854c848c9b79C49a8Cc6cc89176a49",
+  "questionId": "0xdef...456",
+  "outcomeSlotCount": 2,
+  "collateralToken": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+  "yesTokenId": "0xYYY...",
+  "noTokenId": "0xZZZ...",
+  "gamma": { ... }
+}
+```
+
+### 综合演示
+
+```bash
+# 运行完整 demo，同时执行交易解析和市场解码
+python -m src.demo \
+    --tx-hash 0x916cad96dd5c219997638133512fd17fe7c1ce72b830157e4fd5323cf4f19946 \
+    --event-slug will-there-be-another-us-government-shutdown-by-january-31 \
+    --output ./data/demo_output.json
+```
+
+**预期输出**：
+
+```json
+{
+  "stage1": {
+    "tx_hash": "0x916cad...",
+    "trades": [ ... ],
+    "position_split": { ... },
+    "market": {
+      "conditionId": "...",
+      "oracle": "...",
+      "questionId": "...",
+      "collateralToken": "...",
+      "yesTokenId": "...",
+      "noTokenId": "..."
+    },
+    "gamma": { ... }
+  }
+}
+```
+
+### 验证清单（必须全部通过）
+
+以下所有检查项均为**必须通过**的验收标准：
+
+- [ ] `trade_decoder` 能正确解析 `OrderFilled` 事件并输出交易详情
+- [ ] `trade_decoder` 正确计算 `price`、`side`、`token_id`
+- [ ] `trade_decoder` 正确过滤 `taker == exchange` 的重复日志
+- [ ] `market_decoder` 能从 Gamma API 获取市场信息
+- [ ] `market_decoder` 能正确计算 `yesTokenId` 和 `noTokenId`
+- [ ] 计算得到的 TokenId 与 Gamma API 返回的 `clobTokenIds` 一致
+- [ ] `demo` 脚本能整合两个任务并输出完整结果
+
+### 验收标准说明
+
+1. **命令格式**：验收时将使用上述规定的命令格式运行你的代码，请确保命令行参数与规范一致。
+2. **输出格式**：JSON 输出必须包含规定的所有字段，字段名称必须与示例完全一致（区分大小写）。
+3. **数据正确性**：使用示例交易哈希 `0x916cad96dd5c219997638133512fd17fe7c1ce72b830157e4fd5323cf4f19946` 进行验证，解码结果将与标准答案比对。
+4. **代码可运行**：提交的代码必须在配置好 `.env` 后能够直接运行，不能有额外的手动配置步骤。

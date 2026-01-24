@@ -349,3 +349,322 @@ getLogs({
 ## 总结
 
 通过完成阶段二的索引器构建，我们能够将阶段一学到的 Polymarket 链上数据解析知识应用到实际工程中，搭建起从链上数据到业务数据库的桥梁。在确保准确性、一致性的基础上，索引器可以支持丰富的应用，比如实时行情、历史数据分析、用户盈亏计算等，为 Polymarket 生态提供重要的数据基础设施。
+
+---
+
+## 参考实现示例
+
+以下是基于本项目代码的具体示例，供学习和参考。
+
+### 环境配置
+
+1. 复制 `.env.example` 为 `.env` 并填入必要配置：
+
+```bash
+cp .env.example .env
+```
+
+2. 安装依赖：
+
+```bash
+pip install -r requirements.txt
+```
+
+3. 配置必要的环境变量（`.env` 文件）：
+
+```
+RPC_URL=https://polygon-mainnet.g.alchemy.com/v2/YOUR_API_KEY
+DB_PATH=./data/indexer.db
+```
+
+### 示例数据
+
+项目中使用的示例数据：
+
+- **示例交易哈希**：`0x916cad96dd5c219997638133512fd17fe7c1ce72b830157e4fd5323cf4f19946`
+- **示例事件 Slug**：`will-there-be-another-us-government-shutdown-by-january-31`
+
+### 数据库 Schema 实现
+
+`src/db/schema.py` 定义了数据库表结构，使用 SQLite：
+
+```python
+# 初始化数据库
+conn = init_db("./data/indexer.db")
+```
+
+表结构包括：
+- `events` - 事件信息表
+- `markets` - 市场信息表（包含 `yes_token_id`, `no_token_id` 等）
+- `trades` - 交易记录表（唯一索引 `tx_hash + log_index`）
+- `sync_state` - 同步状态表
+
+### 数据存储实现
+
+`src/db/store.py` 提供了数据访问层函数：
+
+```python
+# 保存市场信息
+upsert_market(conn, market_dict)
+
+# 保存交易记录
+insert_trades(conn, trades_list)
+
+# 查询市场
+market = fetch_market_by_slug(conn, "market-slug")
+
+# 查询交易
+trades = fetch_trades_for_market(conn, market_id, limit=100, offset=0)
+```
+
+### 索引器核心实现
+
+`src/indexer/run.py` 中的 `run_indexer` 函数是核心入口：
+
+```python
+results = run_indexer(
+    w3=w3,
+    conn=conn,
+    settings=settings,
+    from_block=from_block,
+    to_block=to_block,
+    exchange_address=exchange_address,
+    neg_risk_exchange=neg_risk_exchange,
+    ctf_address=ctf_address,
+    exchange_abi=exchange_abi,
+    ctf_abi=ctf_abi,
+    include_ctf=False,
+    include_exchange=True,
+    include_neg_risk=True,
+    event_slug="will-there-be-another-us-government-shutdown-by-january-31",
+)
+```
+
+### API Server 实现
+
+`src/api/server.py` 提供了 HTTP API 服务，支持以下端点：
+
+| 端点 | 说明 |
+|------|------|
+| `GET /events/{slug}` | 获取事件详情 |
+| `GET /events/{slug}/markets` | 获取事件下的所有市场 |
+| `GET /markets/{slug}` | 获取市场详情 |
+| `GET /markets/{slug}/trades` | 获取市场交易记录（支持分页） |
+| `GET /tokens/{token_id}/trades` | 按 TokenId 获取交易记录 |
+
+查询参数：
+- `limit` - 返回条数限制（默认 100）
+- `cursor` - 分页偏移量
+- `fromBlock` / `toBlock` - 区块范围过滤
+
+---
+
+## 验证命令规范
+
+> **重要提示**：任务验收将**严格按照以下规范**进行。请确保你的实现能够通过下述所有验证命令，并产出符合规定格式的输出。**不符合规范的提交将无法通过验收。**
+
+完成任务后，请使用以下统一命令进行验证。所有命令均在 `stage2/` 目录下执行。
+
+### 前置检查
+
+```bash
+# 确保环境配置正确
+cp .env.example .env
+# 编辑 .env 填入有效的 RPC_URL
+
+# 安装依赖
+pip install -r requirements.txt
+```
+
+### 任务 A：Market Discovery 验证
+
+Market Discovery 功能集成在 `run_indexer` 中，会自动从 Gamma API 获取并保存市场信息。
+
+```bash
+# 运行 demo 时会自动执行 Market Discovery
+python -m src.demo \
+    --tx-hash 0x916cad96dd5c219997638133512fd17fe7c1ce72b830157e4fd5323cf4f19946 \
+    --event-slug will-there-be-another-us-government-shutdown-by-january-31 \
+    --reset-db
+```
+
+验证数据库中是否有市场数据：
+
+```bash
+sqlite3 ./data/demo_indexer.db "SELECT slug, condition_id, yes_token_id, no_token_id FROM markets LIMIT 5;"
+```
+
+### 任务 B：Trades Indexer 验证
+
+```bash
+# 基础用法：索引单个区块（包含示例交易的区块）
+python -m src.demo \
+    --tx-hash 0x916cad96dd5c219997638133512fd17fe7c1ce72b830157e4fd5323cf4f19946 \
+    --event-slug will-there-be-another-us-government-shutdown-by-january-31 \
+    --output ./data/demo_output.json
+
+# 指定区块范围索引
+python -m src.demo \
+    --from-block 66000000 \
+    --to-block 66001000 \
+    --event-slug will-there-be-another-us-government-shutdown-by-january-31 \
+    --db ./data/indexer.db
+
+# 重置数据库后重新索引
+python -m src.demo \
+    --tx-hash 0x916cad96dd5c219997638133512fd17fe7c1ce72b830157e4fd5323cf4f19946 \
+    --event-slug will-there-be-another-us-government-shutdown-by-january-31 \
+    --reset-db \
+    --output ./data/demo_output.json
+```
+
+**预期输出格式**：
+
+```json
+{
+  "stage2": {
+    "from_block": 66000000,
+    "to_block": 66000000,
+    "inserted_trades": 5,
+    "market_slug": "will-there-be-another-us-government-shutdown-by-january-31",
+    "market_id": 1,
+    "sample_trades": [
+      {
+        "tx_hash": "0x...",
+        "log_index": 123,
+        "block_number": 66000000,
+        "timestamp": "2024-01-15T12:00:00",
+        "side": "BUY",
+        "outcome": "YES",
+        "price": "0.45",
+        "size": "100.0",
+        "token_id": "12345..."
+      }
+    ],
+    "db_path": "./data/demo_indexer.db"
+  }
+}
+```
+
+验证数据库中的交易数据：
+
+```bash
+sqlite3 ./data/demo_indexer.db "SELECT tx_hash, side, outcome, price, size FROM trades LIMIT 10;"
+```
+
+### 任务 C：API Server 验证
+
+```bash
+# 启动 API 服务器
+python -m src.api.server --db ./data/demo_indexer.db --port 8000
+```
+
+在另一个终端中测试 API 端点：
+
+```bash
+# 获取事件信息
+curl http://127.0.0.1:8000/events/will-there-be-another-us-government-shutdown-by-january-31
+
+# 获取市场信息
+curl http://127.0.0.1:8000/markets/will-there-be-another-us-government-shutdown-by-january-31
+
+# 获取市场交易记录（带分页）
+curl "http://127.0.0.1:8000/markets/will-there-be-another-us-government-shutdown-by-january-31/trades?limit=10&cursor=0"
+
+# 按 TokenId 获取交易
+curl "http://127.0.0.1:8000/tokens/<token_id>/trades?limit=10"
+```
+
+**API 响应格式示例**：
+
+`GET /markets/{slug}`:
+
+```json
+{
+  "market_id": 1,
+  "slug": "will-there-be-another-us-government-shutdown-by-january-31",
+  "condition_id": "0xabc...123",
+  "question_id": "0xdef...456",
+  "oracle": "0x157Ce2d672854c848c9b79C49a8Cc6cc89176a49",
+  "collateral_token": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+  "yes_token_id": "12345...",
+  "no_token_id": "67890...",
+  "status": "active"
+}
+```
+
+`GET /markets/{slug}/trades`:
+
+```json
+[
+  {
+    "trade_id": 1,
+    "market_id": 1,
+    "tx_hash": "0x...",
+    "log_index": 123,
+    "block_number": 66000000,
+    "timestamp": "2024-01-15T12:00:00",
+    "maker": "0x...",
+    "taker": "0x...",
+    "side": "BUY",
+    "outcome": "YES",
+    "price": "0.45",
+    "size": "100.0"
+  }
+]
+```
+
+### 综合验证流程
+
+```bash
+# 1. 初始化并索引数据
+python -m src.demo \
+    --tx-hash 0x916cad96dd5c219997638133512fd17fe7c1ce72b830157e4fd5323cf4f19946 \
+    --event-slug will-there-be-another-us-government-shutdown-by-january-31 \
+    --reset-db \
+    --db ./data/demo_indexer.db \
+    --output ./data/demo_output.json
+
+# 2. 检查输出文件
+cat ./data/demo_output.json
+
+# 3. 验证数据库内容
+sqlite3 ./data/demo_indexer.db "SELECT COUNT(*) FROM markets;"
+sqlite3 ./data/demo_indexer.db "SELECT COUNT(*) FROM trades;"
+
+# 4. 启动 API 服务并测试（在后台运行）
+python -m src.api.server --db ./data/demo_indexer.db --port 8000 &
+
+# 5. 测试 API
+curl http://127.0.0.1:8000/markets/will-there-be-another-us-government-shutdown-by-january-31
+curl "http://127.0.0.1:8000/markets/will-there-be-another-us-government-shutdown-by-january-31/trades?limit=5"
+
+# 6. 停止 API 服务
+kill %1
+```
+
+### 验证清单（必须全部通过）
+
+以下所有检查项均为**必须通过**的验收标准：
+
+- [ ] 数据库正确初始化，包含 `events`、`markets`、`trades`、`sync_state` 表
+- [ ] Market Discovery 能从 Gamma API 获取市场并存入数据库
+- [ ] 市场数据包含正确的 `yes_token_id` 和 `no_token_id`
+- [ ] Trades Indexer 能扫描指定区块范围的 `OrderFilled` 事件
+- [ ] 交易记录正确关联到对应的市场（通过 TokenId 匹配）
+- [ ] 交易记录包含正确的 `outcome`（YES/NO）
+- [ ] 重复插入相同交易不会产生重复数据（幂等性）
+- [ ] `sync_state` 正确记录最后处理的区块高度
+- [ ] API 服务正常启动并响应请求
+- [ ] `GET /markets/{slug}` 返回正确的市场信息
+- [ ] `GET /markets/{slug}/trades` 返回分页的交易记录
+- [ ] API 支持 `limit`、`cursor`、`fromBlock`、`toBlock` 查询参数
+
+### 验收标准说明
+
+1. **命令格式**：验收时将使用上述规定的命令格式运行你的代码，请确保命令行参数与规范一致。
+2. **输出格式**：JSON 输出必须包含规定的所有字段，字段名称必须与示例完全一致（区分大小写）。
+3. **数据正确性**：使用示例交易哈希 `0x916cad96dd5c219997638133512fd17fe7c1ce72b830157e4fd5323cf4f19946` 和示例事件 Slug `will-there-be-another-us-government-shutdown-by-january-31` 进行验证。
+4. **数据库结构**：数据库表结构必须与文档中定义的 Schema 一致，包括字段名称和类型。
+5. **API 规范**：API 端点路径和响应格式必须与文档规定一致，评审将使用 `curl` 命令进行验证。
+6. **代码可运行**：提交的代码必须在配置好 `.env` 后能够直接运行，不能有额外的手动配置步骤。
