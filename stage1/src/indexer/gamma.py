@@ -58,25 +58,9 @@ def fetch_market_by_slug(base_url: Optional[str], slug: str) -> Dict[str, Any]:
     if base_url is None:
         base_url = get_gamma_base_url()
     
-    # Gamma API 的 /markets/{id} 端点使用的是 ID，不是slug
-    # 如果传入的看起来像数字 ID，直接使用
-    # 否则假定是 slug，需要先查找对应的 ID
-    url = f"{base_url}/markets/{slug}"
+    # Gamma API 的正确 URL 格式是 /markets/slug/{slug}
+    url = f"{base_url}/markets/slug/{slug}"
     response = requests.get(url)
-    
-    # 如果失败且不是纯数字，可能是 slug，尝试搜索
-    if response.status_code == 422 and not slug.isdigit():
-        # 尝试从市场列表中搜索
-        try:
-            markets_response = requests.get(f"{base_url}/markets", params={'limit': 100})
-            if markets_response.status_code == 200:
-                markets = markets_response.json()
-                for market in markets:
-                    if market.get('slug') == slug:
-                        return market
-        except:
-            pass
-    
     response.raise_for_status()
     return response.json()
 

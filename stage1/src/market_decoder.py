@@ -169,7 +169,10 @@ def decode_market_from_gamma(market_slug: str) -> MarketParams:
     
     # 验证计算结果与 Gamma API 返回的 Token IDs 是否一致
     gamma_token_ids = params.get('clob_token_ids', [])
-    if gamma_token_ids:
+    yes_token_id = positions.position_yes
+    no_token_id = positions.position_no
+    
+    if gamma_token_ids and len(gamma_token_ids) >= 2:
         # 规范化格式进行比较
         gamma_yes = gamma_token_ids[0].lower()
         gamma_no = gamma_token_ids[1].lower() if len(gamma_token_ids) > 1 else ''
@@ -185,6 +188,10 @@ def decode_market_from_gamma(market_slug: str) -> MarketParams:
             print("⚠ Warning: Calculated Token IDs differ from Gamma API", file=sys.stderr)
             print(f"  Gamma: YES={gamma_yes}, NO={gamma_no}", file=sys.stderr)
             print(f"  Calculated: YES={calc_yes}, NO={calc_no}", file=sys.stderr)
+            print("  Using Gamma API Token IDs (likely NegativeRisk market)", file=sys.stderr)
+            # 使用 Gamma API 的 Token IDs，因为这可能是 NegativeRisk 市场
+            yes_token_id = gamma_token_ids[0]
+            no_token_id = gamma_token_ids[1]
     
     return MarketParams(
         condition_id=condition_id,
@@ -192,8 +199,8 @@ def decode_market_from_gamma(market_slug: str) -> MarketParams:
         question_id=question_id,
         outcome_slot_count=2,
         collateral_token=USDC_ADDRESS,
-        yes_token_id=positions.position_yes,
-        no_token_id=positions.position_no,
+        yes_token_id=yes_token_id,
+        no_token_id=no_token_id,
         gamma=params
     )
 
