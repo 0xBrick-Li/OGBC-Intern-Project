@@ -30,8 +30,8 @@ echo "✓ 环境变量配置检查通过"
 
 # 测试示例交易哈希
 TX_HASH="0x916cad96dd5c219997638133512fd17fe7c1ce72b830157e4fd5323cf4f19946"
-# 使用市场 ID 而不是 slug（Gamma API 需要 ID）
-MARKET_ID="12"
+# 使用市场 slug
+MARKET_SLUG="will-there-be-another-us-government-shutdown-by-january-31"
 
 echo ""
 echo "========================================"
@@ -53,7 +53,7 @@ echo ""
 echo "========================================"
 echo "测试 2/3: 市场解码器"
 echo "========================================"
-python -m src.market_decoder --market-slug "$MARKET_ID" --output ./data/market_test.json
+python -m src.market_decoder --market-slug "$MARKET_SLUG" --output ./data/market_test.json
 
 if [ -f ./data/market_test.json ]; then
     echo "✓ 市场解码成功，结果已保存到 ./data/market_test.json"
@@ -71,7 +71,7 @@ echo "测试 3/3: 综合演示"
 echo "========================================"
 python -m src.demo \
     --tx-hash "$TX_HASH" \
-    --event-slug "$MARKET_ID" \
+    --event-slug "$MARKET_SLUG" \
     --output ./data/demo_test.json
 
 if [ -f ./data/demo_test.json ]; then

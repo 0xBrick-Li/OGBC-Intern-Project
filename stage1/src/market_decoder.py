@@ -141,22 +141,9 @@ def decode_market_from_gamma(market_slug: str) -> MarketParams:
     if not question_id.startswith('0x'):
         question_id = '0x' + question_id
     
-    # 从市场数据中获取 oracle (可能在不同字段中)
-    oracle = None
-    
-    # 尝试从不同字段获取 oracle
-    if 'oracle' in market_data:
-        oracle = market_data['oracle']
-    elif 'neg_risk' in market_data and market_data['neg_risk']:
-        # 负风险市场使用特定的 oracle
-        oracle = "0x157Ce2d672854c848c9b79C49a8Cc6cc89176a49"  # UMAAdapterV2
-    else:
-        # 默认使用 UMA Optimistic Oracle V2
-        oracle = "0x157Ce2d672854c848c9b79C49a8Cc6cc89176a49"
-    
-    if not oracle.startswith('0x'):
-        oracle = '0x' + oracle
-    
+    # Gamma API 不提供 oracle 字段，使用 Polymarket 标准预言机
+    # Polymarket 使用 UMA Optimistic Oracle V2 (UMAAdapterV2)
+    oracle = "0x157Ce2d672854c848c9b79C49a8Cc6cc89176a49"
     oracle = Web3.to_checksum_address(oracle)
     
     # 计算 Token IDs
